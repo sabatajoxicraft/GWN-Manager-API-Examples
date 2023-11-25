@@ -22,20 +22,16 @@ def get_token(DEFAULT_URL, ID, SECRET_KEY):
     
     return res["access_token"]
 
-def create_signature(Access_token, param, appID):
+def create_signature(Access_token, param, appID, clientID):
     timestamp = int(time.time() * 1000)
-    body = sha256(json.dumps(param).encode("utf-8")).hexdigest()
-    signatur_string = f"&access_token={Access_token}&appID={appID}&timestamp={timestamp}&{body}&"
-    signature = sha256(signatur_string.encode("utf-8")).hexdigest()
-
-    print(f"Signature String: {signatur_string}")
-    print(f"Calculated Signature: {signature}")
-    print(f"Timestamp: {timestamp}")
-
+    prebody = json.dumps(body_data, separators=(',', ':')).encode('utf-8')
+    body = hashlib.sha256(prebody).hexdigest()
+    signature_string = f"&access_token={Access_token}&appID={clientID}&timestamp={timestamp}&{body}&"
+    signature = hashlib.sha256(signature_string.encode("utf-8")).hexdigest()
     return signature, timestamp
 
 
-def get_network(DEFAULT_URL, Access_token, appID):
+def get_network(DEFAULT_URL, Access_token, appID, clientID):
     param = {
         "type": "asc",
         "order": "id",
@@ -43,16 +39,17 @@ def get_network(DEFAULT_URL, Access_token, appID):
         "pageNum": 1,
         "pageSize": 5
     }
+    debug(param)
     
-    signatur, timestamp = create_signature(Access_token=Access_token, appID=appID, param=param)
+    signatur, timestamp = create_signature(Access_token=Access_token, appID=appID, clientID=clientID, param=param)
     
     URL = DEFAULT_URL + f"/oapi/v1.0.0/network/list?access_token={Access_token}&appID={appID}&timestamp={timestamp}&signature={signatur}"
     headers = { 'Content-type': 'application/json'}
     
-    print(URL)
+    debug(URL)
     r = requests.get(url=URL, params=param,  headers=headers)
-
-    pprint(ljson(r.text))
+    
+    debug(ljson(r.text))
     
     
 def get_voucher(DEFAULT_URL, Access_token, appID, networkID):
@@ -63,18 +60,24 @@ def get_voucher(DEFAULT_URL, Access_token, appID, networkID):
      "pageSize": 10,
      "networkId": networkID
     }
+    
     signatur, timestamp = create_signature(Access_token=Access_token, appID=appID, param=param)
     URL = DEFAULT_URL + f"oapi/v1.0.0/voucher/list?&appID={appID}&timestamp={timestamp}&signatur={signatur}"
     headers = { 'Content-type': 'application/json'}
-    print(URL)
+    debug(URL)
     r = requests.post(url=URL, params=param,  headers=headers)
-    pprint(r.json)
+    debug(r.json)
     
     
 def ljson(input):
     json_return = json.loads(input)
     return json_return
 
+
+def debug(input):
+    pprint(input)
+    print("")
+
 key = get_token(DEFAULT_URL=DEFAULT_ENV, ID=ID_ENV, SECRET_KEY=SECRET_KEY_ENV)
 
-get_network(DEFAULT_URL=DEFAULT_ENV, Access_token=key, appID=ID_ENV)
+get_network(DEFAULT_URL=DEFAULT_ENV, Access_token=key, appID=ID_ENV, clientID=ID_ENV)
