@@ -91,8 +91,6 @@ def get_network_details(DEFAULT_URL, Access_token, appID, appSecret, networkID):
 
     debug(ljson(network_response.text)['data'])
 
-
-
     
 def get_voucher(DEFAULT_URL, Access_token, appID, appSecret, networkID):
     timestamp = round(time.time() * 1000)
