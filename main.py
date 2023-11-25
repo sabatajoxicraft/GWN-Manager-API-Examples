@@ -22,34 +22,41 @@ def get_token(DEFAULT_URL, ID, SECRET_KEY):
     
     return res["access_token"]
 
-def create_signature(Access_token, param, appID, clientID):
-    timestamp = int(time.time() * 1000)
-    prebody = json.dumps(body_data, separators=(',', ':')).encode('utf-8')
-    body = hashlib.sha256(prebody).hexdigest()
-    signature_string = f"&access_token={Access_token}&appID={clientID}&timestamp={timestamp}&{body}&"
-    signature = hashlib.sha256(signature_string.encode("utf-8")).hexdigest()
-    return signature, timestamp
-
-
-def get_network(DEFAULT_URL, Access_token, appID, clientID):
-    param = {
+def get_network(DEFAULT_URL, Access_token, appID, appSecret):
+    timestamp = round(time.time() * 1000)
+    public_params = {
+        'access_token': Access_token,
+        'appID': appID,
+        'secretKey': appSecret,
+        'timestamp': timestamp
+    }
+        
+    body_data = {
         "type": "asc",
         "order": "id",
         "search": "",
         "pageNum": 1,
         "pageSize": 5
     }
-    debug(param)
+    params = "&".join([f"{key}={public_params[key]}" for key in public_params])
+    body = json.dumps(body_data, separators=(',', ':'))
+
+    body_signature = sha256(body.encode()).hexdigest()
+    signature = sha256(f"&{params}&{body_signature}&".encode()).hexdigest()
     
-    signatur, timestamp = create_signature(Access_token=Access_token, appID=appID, clientID=clientID, param=param)
+    payload_data = {
+        'access_token': Access_token,
+        'appID': appID,
+        'timestamp': timestamp,
+        'signature': signature
+    }
+
+    payload = "&".join([f"{key}={payload_data[key]}" for key in payload_data])
     
-    URL = DEFAULT_URL + f"/oapi/v1.0.0/network/list?access_token={Access_token}&appID={appID}&timestamp={timestamp}&signature={signatur}"
-    headers = { 'Content-type': 'application/json'}
-    
-    debug(URL)
-    r = requests.get(url=URL, params=param,  headers=headers)
-    
-    debug(ljson(r.text))
+    network_url = f'{DEFAULT_URL}/oapi/v1.0.0/network/list'
+    network_response = requests.post(network_url + "?" + payload, data=body, headers={'Content-type': 'application/json'}, verify=False, timeout=30)
+
+    debug(ljson(network_response.text))
     
     
 def get_voucher(DEFAULT_URL, Access_token, appID, networkID):
@@ -80,4 +87,4 @@ def debug(input):
 
 key = get_token(DEFAULT_URL=DEFAULT_ENV, ID=ID_ENV, SECRET_KEY=SECRET_KEY_ENV)
 
-get_network(DEFAULT_URL=DEFAULT_ENV, Access_token=key, appID=ID_ENV, clientID=ID_ENV)
+get_network(DEFAULT_URL=DEFAULT_ENV, Access_token=key, appID=ID_ENV, appSecret=SECRET_KEY_ENV)
