@@ -200,6 +200,39 @@ def get_ap(DEFAULT_URL, Access_token, appID, appSecret, networkID):
 
     debug(ljson(network_response.text)['data'])
     
+    
+def get_portals(DEFAULT_URL, Access_token, appID, appSecret, networkID):
+    timestamp = round(time.time() * 1000)
+    public_params = {
+        'access_token': Access_token,
+        'appID': appID,
+        'secretKey': appSecret,
+        'timestamp': timestamp
+    }
+        
+    body_data = {
+        "networkId": networkID
+    }
+    params = "&".join([f"{key}={public_params[key]}" for key in public_params])
+    body = json.dumps(body_data, separators=(',', ':'))
+
+    body_signature = sha256(body.encode()).hexdigest()
+    signature = sha256(f"&{params}&{body_signature}&".encode()).hexdigest()
+    
+    payload_data = {
+        'access_token': Access_token,
+        'appID': appID,
+        'timestamp': timestamp,
+        'signature': signature
+    }
+
+    payload = "&".join([f"{key}={payload_data[key]}" for key in payload_data])
+    
+    network_url = f'{DEFAULT_URL}/oapi/v1.0.0/portal/list'
+    network_response = requests.post(network_url + "?" + payload, data=body, headers={'Content-type': 'application/json'}, timeout=30)
+
+    debug(ljson(network_response.text)['data'])
+    
  
 def ljson(input):
     json_return = json.loads(str(input))
@@ -212,5 +245,6 @@ def debug(input):
 
 key = get_token(DEFAULT_URL=DEFAULT_ENV, ID=ID_ENV, SECRET_KEY=SECRET_KEY_ENV)
 
-get_ap(Access_token=key, appID=ID_ENV, appSecret=SECRET_KEY_ENV, DEFAULT_URL=DEFAULT_ENV, networkID=1)
+get_portals(Access_token=key, appID=ID_ENV, appSecret=SECRET_KEY_ENV, DEFAULT_URL=DEFAULT_ENV, networkID=1)
+
 
