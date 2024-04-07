@@ -6,6 +6,9 @@ from hashlib import sha256
 import time
 from pprint import pprint
 from twilio.rest import Client
+import pandas as pd
+from msdrive import OneDrive
+import msal
 
 load_dotenv()
 
@@ -17,6 +20,12 @@ account_sid = os.getenv("TWILIO_ACCOUNT_SID")
 auth_token = os.getenv("TWILIO_AUTH_TOKEN")
 from_SMS_number = os.getenv("TWILIO_PHONE_NUMBER")
 from_WA_number = os.getenv("TWILIO_WHATSAPP_NO")
+CLIENT_ID = os.getenv("CLIENT_ID")
+CLIENT_SECRET = os.getenv("CLIENT_SECRET")
+FILE_ID = os.getenv("FILE_ID")
+FILE_NAME = os.getenv("FILE_NAME")
+AUTHORITY_URL = os.getenv("AUTHORITY_URL")
+TENANT_ID = os.getenv("TENANT_ID")
 
 client = Client(account_sid, auth_token)
 
@@ -30,6 +39,21 @@ def get_token(DEFAULT_URL, ID, SECRET_KEY):
     res = json.loads(r.text) 
     
     return res["access_token"]
+
+def get_access_token():
+    app = msal.PublicClientApplication(authority=AUTHORITY_URL + TENANT_ID, client_id=CLIENT_ID)
+
+    # Start the device flow and print instructions to screen
+    flow = app.initiate_device_flow(scopes=["Files.Read.All"])
+    print(flow["message"])
+
+    # Block until user logs in
+    result = app.acquire_token_by_device_flow(flow)
+
+    if "access_token" in result:
+        return result["access_token"]
+    else:
+        raise Exception(result["error"])
 
 def get_network_id(DEFAULT_URL, Access_token, appID, appSecret, NetworkName):
     timestamp = round(time.time() * 1000)
@@ -182,7 +206,7 @@ def get_voucher_group_list(DEFAULT_URL, Access_token, appID, appSecret, networkI
     network_url = f'{DEFAULT_URL}/oapi/v1.0.0/voucher/list'
     network_response = requests.post(network_url + "?" + payload, data=body, headers={'Content-type': 'application/json'}, timeout=30)
 
-    debug(ljson(network_response.text)['data'])
+    # debug(ljson(network_response.text)['data'])
 
     voucher_groups = ljson(network_response.text)['data']['result']
     voucher_group_ids = [group['id'] for group in voucher_groups]
@@ -271,8 +295,8 @@ def new_voucher_group(DEFAULT_URL, Access_token, appID, appSecret, VoucherData):
     network_url = f'{DEFAULT_URL}/oapi/v1.0.0/voucher/save'
     network_response = requests.post(network_url + "?" + payload, data=body, headers={'Content-type': 'application/json'}, timeout=30)
 
-    debug(network_response.url)
-    debug(ljson(network_response.text))
+    # debug(network_response.url)
+    # debug(ljson(network_response.text))
 
 def get_ssid(DEFAULT_URL, Access_token, appID, appSecret, networkID):
     timestamp = round(time.time() * 1000)
@@ -442,6 +466,11 @@ def cleanup_files():
             data = json.load(f)
             if time.time() - data['timestamp'] >= 3600:  # Check if network_id is more than 1 hour old
                 os.remove('network_store.txt')
+    if os.path.exists(FILE_NAME):
+        with open(FILE_NAME, 'r') as f:
+            data = json.load(f)
+            if time.time() - data['timestamp'] >= 3600:  # Check if network_id is more than 1 hour old
+                os.remove(FILE_NAME)
 
 def get_voucher_data(networkID, voucher_group_number):
     voucherName = input(f"Enter the voucher {voucher_group_number} group name: ")
@@ -474,7 +503,7 @@ def send_sms_message(to_number, voucher_password):
                     to = to_number
                 )
 
-    return message.sid
+    print("SMS: " + message.sid)
 
 def send_WA_message(to_number, voucher_password):
     body_message = f'Hi Sebanebane Wa Kae-Kae, Your WIFI voucher password is:  + {voucher_password}'
@@ -485,7 +514,23 @@ def send_WA_message(to_number, voucher_password):
         to=f'whatsapp:{to_number}'
     )
 
-    print(message.sid)
+    print("WA: " + message.sid)
+
+def read_excel_columns(filename):
+    df = pd.read_excel(filename, usecols=None)
+    return df.to_dict(orient='records')
+
+def format_number(number):
+    # Convert number to string if it's not already a string
+    if not isinstance(number, str):
+        number = str(number)
+    # Check if the number is a valid 9 or 10-digit number
+    if len(number) == 10 and number.startswith('0'):
+        return '+27' + number[1:]
+    elif len(number) == 9:
+        return '+27' + number
+    else:
+        return number
 
 def interact_with_network():
     cleanup_files()  # Call cleanup_files at the start of the function
@@ -508,7 +553,7 @@ def interact_with_network():
     num_vouchers = int(input("Enter the number of voucher groups you want to create: "))
     for i in range(num_vouchers):
         VoucherData = get_voucher_data(networkID, i+1)
-        debug(VoucherData)
+        # debug(VoucherData)
         new_voucher_group(DEFAULT_URL=DEFAULT_ENV, Access_token=token, appID=ID_ENV, appSecret=SECRET_KEY_ENV, VoucherData=VoucherData)
 
     # Get all the voucher groups
@@ -521,23 +566,46 @@ def interact_with_network():
         all_vouchers.append(vouchers_in_group)
 
     # Print all the vouchers
-    for group_vouchers in all_vouchers:
-        print(group_vouchers)
+    #for group_vouchers in all_vouchers:
+    #     print(group_vouchers)
+
+    # Get Access Token for Sharepoint
+    token = get_access_token()
+
+    # Initialize OneDrive
+    drive = OneDrive(token)
+
+    # Download the Excel file from OneDrive
+    drive.download_item(item_id=FILE_ID, file_path=FILE_NAME) # if you know the item ID
+
+    # Read specific columns from the Excel file
+    column_data = read_excel_columns(FILE_NAME)
 
     # Send SMS or WhatsApp message for the first voucher in the first group
-    to_number = input("Enter the phone number to send the voucher to: ")
-    message_type = input("Enter the type of message to send (SMS or WhatsApp): ")
-    if all_vouchers:
+    if all_vouchers and column_data:
         first_group_vouchers = all_vouchers[0]
         if first_group_vouchers:
             first_voucher = first_group_vouchers[0]
             voucher_password = first_voucher  # Replace this with the actual password extraction logic
-            if message_type.lower() == "sms":
-                send_sms_message(to_number, voucher_password)
-            elif message_type.lower() == "whatsapp":
-                send_WA_message(to_number, voucher_password)
+            student_name = column_data[0]['Applicant first name']  # Get the student name
+            whatsapp_number = format_number(column_data[0]['WhatsApp Phone number'])
+            sms_number = format_number(column_data[0]['SMS Phone number'])
+            if whatsapp_number.startswith('+27'):  # If WhatsApp number is present and valid
+                to_number = whatsapp_number
+                message_type = "WhatsApp"
+            elif sms_number.startswith('+27'):  # If SMS number is present and valid
+                to_number = sms_number
+                message_type = "SMS"
             else:
-                print("Invalid message type. Please enter either 'SMS' or 'WhatsApp'.")
+                print("No valid WhatsApp or SMS number found.")
+                return
+            message = f"Hello {student_name}, your voucher password is {voucher_password}"
+            if message_type.lower() == "sms":
+                send_sms_message(to_number, message)
+                print("SMS sent to: " + to_number)
+            elif message_type.lower() == "whatsapp":
+                send_WA_message(to_number, message)
+                print("Whatsapp sent to: " + to_number)
 
     return all_vouchers
 
