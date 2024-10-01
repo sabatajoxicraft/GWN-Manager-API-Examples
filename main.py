@@ -41,6 +41,9 @@ def get_token(DEFAULT_URL, ID, SECRET_KEY):
     return res["access_token"]
 
 def get_access_token():
+    if AUTHORITY_URL is None or TENANT_ID is None:
+        raise ValueError("AUTHORITY_URL and TENANT_ID must be set")
+
     app = msal.PublicClientApplication(authority=AUTHORITY_URL + TENANT_ID, client_id=CLIENT_ID)
 
     # Start the device flow and print instructions to screen
@@ -171,6 +174,9 @@ def get_network_details(DEFAULT_URL, Access_token, appID, appSecret, networkID):
 
     ##debug(ljson(network_response.text)['data'])
 
+
+    
+    
     
 def get_voucher_group_list(DEFAULT_URL, Access_token, appID, appSecret, networkID):
     timestamp = round(time.time() * 1000)
@@ -451,25 +457,15 @@ def load_network_id():
     if os.path.exists('network_store.txt'):
         with open('network_store.txt', 'r') as f:
             data = json.load(f)
-            if time.time() - data['timestamp'] < 3600:  # Check if network_id is less than 1 hour old
+            if time.time() - data['timestamp'] < 3600:  # Check if network_store is less than 1 hour old
                 return data['network_id']
     return None
 
 def cleanup_files():
-    if os.path.exists('token_store.txt'):
-        with open('token_store.txt', 'r') as f:
-            data = json.load(f)
-            if time.time() - data['timestamp'] >= 3600:  # Check if token is more than 1 hour old
-                os.remove('token_store.txt')
-    if os.path.exists('network_store.txt'):
-        with open('network_store.txt', 'r') as f:
-            data = json.load(f)
-            if time.time() - data['timestamp'] >= 3600:  # Check if network_id is more than 1 hour old
-                os.remove('network_store.txt')
-    if os.path.exists(FILE_NAME):
+    if FILE_NAME is not None and os.path.exists(FILE_NAME):
         with open(FILE_NAME, 'r') as f:
             data = json.load(f)
-            if time.time() - data['timestamp'] >= 3600:  # Check if network_id is more than 1 hour old
+            if time.time() - data['timestamp'] >= 3600:  # Check if FILE_NAME is more than 1 hour old
                 os.remove(FILE_NAME)
 
 def get_voucher_data(networkID, voucher_group_number):
@@ -494,36 +490,93 @@ def get_voucher_data(networkID, voucher_group_number):
     }
     return VoucherData
 
-def send_sms_message(to_number, voucher_password):
-    body_message = f'Hi Sebanebane Wa Kae-Kae, Your WIFI voucher password is:  + {voucher_password}'
-
+def send_sms_message(to_number, message):
     message = client.messages.create(
-                    body = body_message,
+                    body = message,
                     from_ = from_SMS_number,
                     to = to_number
                 )
 
-    print("SMS: " + message.sid)
+    if message.sid:
+        print("SMS: " + message.sid)
+        return True
+    else:
+        return False
 
-def send_WA_message(to_number, voucher_password):
-    body_message = f'Hi Sebanebane Wa Kae-Kae, Your WIFI voucher password is:  + {voucher_password}'
-
+def send_WA_message(to_number, message):
     message = client.messages.create(
         from_=from_WA_number,
-        body=body_message,
+        body=message,
         to=f'whatsapp:{to_number}'
     )
 
-    print("WA: " + message.sid)
+    if message.sid:
+        print("WA: " + message.sid)
+        return True
+    else:
+        return False
 
 def read_excel_columns(filename):
     df = pd.read_excel(filename, usecols=None)
     return df.to_dict(orient='records')
 
+def modify_excel_file(FILE_NAME, column_data, all_vouchers):
+    """
+    Modifies an Excel file by updating specific columns with provided data.
+
+    Args:
+        FILE_NAME (str): The path of the Excel file to be modified.
+        column_data (list): A list of data to be updated in the Excel file.
+        all_vouchers (list): A list of voucher codes corresponding to each data item.
+
+    Returns:
+        None
+    """
+
+    # Load the Excel file into a pandas DataFrame
+    df = pd.read_excel(FILE_NAME)
+
+    # Iterate over each student's data and update the corresponding row
+    for index, row in enumerate(column_data):
+        voucher_code = None
+        if all_vouchers and index < len(all_vouchers[0]):
+            voucher_code = all_vouchers[0][index]
+
+        # Update the "Voucher Sent" column to "Yes"
+        df.at[index, 'Voucher Sent'] = 'Yes'
+
+        # Update the "Voucher Code" column with the corresponding voucher code
+        if voucher_code:
+            df.at[index, 'Voucher Code'] = voucher_code
+
+    # Save the modified DataFrame back to the Excel file
+    df.to_excel(FILE_NAME, index=False)
+
 def format_number(number):
+    """
+    Formats a phone number to the South African international format.
+
+    Args:
+        number (str or int): The phone number to be formatted.
+
+    Returns:
+        str: The formatted phone number in the South African international format.
+
+    Raises:
+        None
+
+    Examples:
+        >>> format_number('0821234567')
+        '+27821234567'
+
+        >>> format_number(821234567)
+        '+27821234567'
+    """
     # Convert number to string if it's not already a string
     if not isinstance(number, str):
         number = str(number)
+    # Remove any spaces or special characters from the number
+    number = number.replace(' ', '').replace('-', '')
     # Check if the number is a valid 9 or 10-digit number
     if len(number) == 10 and number.startswith('0'):
         return '+27' + number[1:]
@@ -532,7 +585,90 @@ def format_number(number):
     else:
         return number
 
+def process_excel_file(token, FILE_ID, FILE_NAME, all_vouchers):
+    """
+    Process an Excel file by downloading it from OneDrive, reading specific columns,
+    modifying the file, and returning the column data.
+
+    Parameters:
+    - token (str): The access token for OneDrive authentication.
+    - FILE_ID (str): The ID of the Excel file on OneDrive.
+    - FILE_NAME (str): The local file path to save the downloaded Excel file.
+    - all_vouchers (list): A list of vouchers to be used for modifying the Excel file.
+
+    Returns:
+    - column_data (dict): A dictionary containing the data from specific columns of the Excel file.
+    """
+    # Initialize OneDrive
+    drive = OneDrive(token)
+
+    # Download the Excel file from OneDrive
+    # if you know the item ID
+    drive.download_item(item_id=FILE_ID, file_path=FILE_NAME) 
+
+    # Read specific columns from the Excel file
+    column_data = read_excel_columns(FILE_NAME)
+
+    # Modify the Excel file
+    modify_excel_file(FILE_NAME, column_data, all_vouchers)
+
+    return column_data
+
+def send_message(all_vouchers, column_data):
+    """
+    Sends an SMS or WhatsApp message for each voucher in the first group based on the preferred communication option.
+
+    Args:
+        all_vouchers (list): A multi-array list containing all the vouchers in the network.
+        column_data (dict): A dictionary containing the data from specific columns of the Excel file.
+
+    Returns:
+        None
+    """
+    # Send SMS or WhatsApp message for each voucher in the first group
+    if all_vouchers and column_data:
+        first_group_vouchers = all_vouchers[0]
+        for index, student_data in enumerate(column_data):
+            if index < len(first_group_vouchers):
+                voucher = first_group_vouchers[index]
+                voucher_password = voucher  # Replace this with the actual password extraction logic
+                student_name = f"{student_data['First name']} {student_data['Last name']}"  # Get the student name
+                whatsapp_number = format_number(student_data['WhatsApp number'])
+                sms_number = format_number(student_data['SMS number'])
+                preferred_communication = student_data['Preferred Communication Option'].lower()
+
+                if preferred_communication == 'WhatsApp' and whatsapp_number:  # If WhatsApp number is present
+                    to_number = whatsapp_number
+                    message_type = "WhatsApp"
+                elif preferred_communication == 'SMS' and sms_number:  # If SMS number is present
+                    to_number = sms_number
+                    message_type = "SMS"
+                else:
+                    print(f"No valid number found for preferred communication method for student {student_name}.")
+                    continue
+
+                message = f"Hello {student_name}, your voucher password is {voucher_password}. Enjoy your internet access!"
+
+                if message_type.lower() == "sms":
+                    if send_sms_message(to_number, message):
+                        print("SMS sent to: " + to_number)
+                    else:
+                        print("Failed to send SMS to: " + to_number)
+                elif message_type.lower() == "whatsapp":
+                    if send_WA_message(to_number, message):
+                        print("Whatsapp sent to: " + to_number)
+                    else:
+                        print("Failed to send Whatsapp to: " + to_number)
+
+                
 def interact_with_network():
+    """
+    Interacts with a network by performing various operations such as creating voucher groups,
+    retrieving voucher information, processing an Excel file, and sending SMS or WhatsApp messages.
+
+    Returns:
+        all_vouchers (list): A multi-array list containing all the vouchers in the network.
+    """
     cleanup_files()  # Call cleanup_files at the start of the function
     token = get_data_store()
     print("My token: " + token)
@@ -552,7 +688,7 @@ def interact_with_network():
     # Create my vouchers
     num_vouchers = int(input("Enter the number of voucher groups you want to create: "))
     for i in range(num_vouchers):
-        VoucherData = get_voucher_data(networkID, i+1)
+        VoucherData = get_voucher_data(networkID, i + 1)
         # debug(VoucherData)
         new_voucher_group(DEFAULT_URL=DEFAULT_ENV, Access_token=token, appID=ID_ENV, appSecret=SECRET_KEY_ENV, VoucherData=VoucherData)
 
@@ -569,44 +705,9 @@ def interact_with_network():
     #for group_vouchers in all_vouchers:
     #     print(group_vouchers)
 
-    # Get Access Token for Sharepoint
-    token = get_access_token()
+    column_data = process_excel_file(token, FILE_ID, FILE_NAME, all_vouchers)
 
-    # Initialize OneDrive
-    drive = OneDrive(token)
-
-    # Download the Excel file from OneDrive
-    drive.download_item(item_id=FILE_ID, file_path=FILE_NAME) # if you know the item ID
-
-    # Read specific columns from the Excel file
-    column_data = read_excel_columns(FILE_NAME)
-
-    # Send SMS or WhatsApp message for the first voucher in the first group
-    if all_vouchers and column_data:
-        first_group_vouchers = all_vouchers[0]
-        if first_group_vouchers:
-            first_voucher = first_group_vouchers[0]
-            voucher_password = first_voucher  # Replace this with the actual password extraction logic
-            student_name = column_data[0]['Applicant first name']  # Get the student name
-            whatsapp_number = format_number(column_data[0]['WhatsApp Phone number'])
-            sms_number = format_number(column_data[0]['SMS Phone number'])
-            if whatsapp_number.startswith('+27'):  # If WhatsApp number is present and valid
-                to_number = whatsapp_number
-                message_type = "WhatsApp"
-            elif sms_number.startswith('+27'):  # If SMS number is present and valid
-                to_number = sms_number
-                message_type = "SMS"
-            else:
-                print("No valid WhatsApp or SMS number found.")
-                return
-            message = f"Hello {student_name}, your voucher password is {voucher_password}"
-            if message_type.lower() == "sms":
-                send_sms_message(to_number, message)
-                print("SMS sent to: " + to_number)
-            elif message_type.lower() == "whatsapp":
-                send_WA_message(to_number, message)
-                print("Whatsapp sent to: " + to_number)
-
-    return all_vouchers
+    # Send an SMS or WhatsApp message for the first voucher in the first group
+    send_message(all_vouchers, column_data)  
 
 interact_with_network()
