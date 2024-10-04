@@ -16,18 +16,22 @@ DEFAULT_ENV = os.getenv("DEFAULT_URL")
 ID_ENV = os.getenv("ID")
 SECRET_KEY_ENV = os.getenv("Key")
 ACCESS_TOKEN_ENV = os.getenv("Access_token")
-account_sid = os.getenv("TWILIO_ACCOUNT_SID")
-auth_token = os.getenv("TWILIO_AUTH_TOKEN")
-from_SMS_number = os.getenv("TWILIO_PHONE_NUMBER")
-from_WA_number = os.getenv("TWILIO_WHATSAPP_NO")
+TWILIO_WHATSAPP_TEMPLATE_SID = os.getenv("TWILIO_WHATSAPP_TEMPLATE_SID")
+TWILIO_SMS_TEMPLATE_SID = os.getenv("TWILIO_SMS_TEMPLATE_SID")
+TWILIO_MESSAGE_SID = os.getenv("TWILIO_MESSAGE_SID")
+ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+FROM_SMS_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
+FROM_WA_NUMBER = os.getenv("TWILIO_WHATSAPP_NO")
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 FILE_ID = os.getenv("FILE_ID")
 FILE_NAME = os.getenv("FILE_NAME")
 AUTHORITY_URL = os.getenv("AUTHORITY_URL")
 TENANT_ID = os.getenv("TENANT_ID")
+USE_MESSAGING_SERVICE = True  # Use messaging service by default
 
-client = Client(account_sid, auth_token)
+client = Client(ACCOUNT_SID, AUTH_TOKEN)
 
 def get_token(DEFAULT_URL, ID, SECRET_KEY):
     Data = {
@@ -174,10 +178,6 @@ def get_network_details(DEFAULT_URL, Access_token, appID, appSecret, networkID):
 
     ##debug(ljson(network_response.text)['data'])
 
-
-    
-    
-    
 def get_voucher_group_list(DEFAULT_URL, Access_token, appID, appSecret, networkID):
     timestamp = round(time.time() * 1000)
     public_params = {
@@ -376,7 +376,6 @@ def get_ap(DEFAULT_URL, Access_token, appID, appSecret, networkID):
 
     ##debug(ljson(network_response.text)['data'])
     
-    
 def get_portals(DEFAULT_URL, Access_token, appID, appSecret, networkID):
     print("get-portal")
     timestamp = round(time.time() * 1000)
@@ -414,11 +413,9 @@ def get_portals(DEFAULT_URL, Access_token, appID, appSecret, networkID):
     #print("get-portal")
     debug(ljson(network_response.text)['data'])
 
-
 def ljson(input):
     json_return = json.loads(str(input))
     return json_return
-
 
 def debug(input):
     pprint(input)
@@ -427,7 +424,6 @@ def debug(input):
 def store_token(token):
     with open('token_store.txt', 'w') as f:
         json.dump({'token': token, 'timestamp': time.time()}, f)
-
 
 def load_token():
     if os.path.exists('token_store.txt'):
@@ -491,11 +487,18 @@ def get_voucher_data(networkID, voucher_group_number):
     return VoucherData
 
 def send_sms_message(to_number, message):
-    message = client.messages.create(
-                    body = message,
-                    from_ = from_SMS_number,
-                    to = to_number
-                )
+    if USE_MESSAGING_SERVICE:
+        message = client.messages.create(
+            messaging_service_sid=TWILIO_MESSAGE_SID,  # Your SMS messaging service SID
+            body=message,
+            to=to_number
+        )
+    else:
+        message = client.messages.create(
+            body=message,
+            from_=FROM_SMS_NUMBER,
+            to=to_number
+        )
 
     if message.sid:
         print("SMS: " + message.sid)
@@ -504,11 +507,18 @@ def send_sms_message(to_number, message):
         return False
 
 def send_WA_message(to_number, message):
-    message = client.messages.create(
-        from_=from_WA_number,
-        body=message,
-        to=f'whatsapp:{to_number}'
-    )
+    if USE_MESSAGING_SERVICE:
+        message = client.messages.create(
+            messaging_service_sid=TWILIO_MESSAGE_SID,  # Your SMS messaging service SID
+            body=message,
+            to=f'whatsapp:{to_number}'
+        )
+    else:
+        message = client.messages.create(
+            from_=FROM_WA_NUMBER,
+            body=message,
+            to=f'whatsapp:{to_number}'
+        )
 
     if message.sid:
         print("WA: " + message.sid)
@@ -617,15 +627,8 @@ def process_excel_file(token, FILE_ID, FILE_NAME, all_vouchers):
 def send_message(all_vouchers, column_data):
     """
     Sends an SMS or WhatsApp message for each voucher in the first group based on the preferred communication option.
-
-    Args:
-        all_vouchers (list): A multi-array list containing all the vouchers in the network.
-        column_data (dict): A dictionary containing the data from specific columns of the Excel file.
-
-    Returns:
-        None
+    If WhatsApp fails, falls back to SMS using the same message structure.
     """
-    # Send SMS or WhatsApp message for each voucher in the first group
     if all_vouchers and column_data:
         first_group_vouchers = all_vouchers[0]
         for index, student_data in enumerate(column_data):
@@ -637,29 +640,48 @@ def send_message(all_vouchers, column_data):
                 sms_number = format_number(student_data['SMS number'])
                 preferred_communication = student_data['Preferred Communication Option'].lower()
 
-                if preferred_communication == 'WhatsApp' and whatsapp_number:  # If WhatsApp number is present
-                    to_number = whatsapp_number
+                # Determine message type and template based on preferred communication
+                if preferred_communication == 'WhatsApp' and whatsapp_number:
                     message_type = "WhatsApp"
-                elif preferred_communication == 'SMS' and sms_number:  # If SMS number is present
-                    to_number = sms_number
+                    content_sid = TWILIO_WHATSAPP_TEMPLATE_SID
+                    to_number = whatsapp_number
+                elif preferred_communication == 'SMS' and sms_number:
                     message_type = "SMS"
+                    content_sid = TWILIO_SMS_TEMPLATE_SID
+                    to_number = sms_number
                 else:
                     print(f"No valid number found for preferred communication method for student {student_name}.")
                     continue
 
-                message = f"Hello {student_name}, your voucher password is {voucher_password}. Enjoy your internet access!"
+                next_month = get_next_month_name()  # Get the next month name
+                content_variables = f'{{"1": "{student_name}", "2": "{next_month}","3": "{voucher_password}"}}'
 
-                if message_type.lower() == "sms":
-                    if send_sms_message(to_number, message):
-                        print("SMS sent to: " + to_number)
-                    else:
-                        print("Failed to send SMS to: " + to_number)
-                elif message_type.lower() == "whatsapp":
-                    if send_WA_message(to_number, message):
-                        print("Whatsapp sent to: " + to_number)
-                    else:
-                        print("Failed to send Whatsapp to: " + to_number)
+                # Send the message
+                try:
+                    send_twilio_message(message_type, to_number, TWILIO_MESSAGE_SID, content_sid, content_variables)
+                except Exception as e:
+                    print(f"Error sending {message_type} message: {e}")
+                    if message_type == "WhatsApp" and sms_number:
+                        send_twilio_message("SMS", sms_number, TWILIO_MESSAGE_SID, TWILIO_SMS_TEMPLATE_SID, content_variables)
 
+def send_twilio_message(message_type, to_number, messaging_service_sid, content_sid, content_variables):
+    """
+    Sends a Twilio message using the provided parameters.
+    """
+    if message_type.lower() == "whatsapp":
+        to_number = f"whatsapp:{to_number}"
+
+    message = client.messages.create(
+            messaging_service_sid=messaging_service_sid, 
+            content_sid=content_sid,
+            content_variables=content_variables,
+            to=to_number
+        )
+
+    if message.sid:
+        print(f"{message_type.upper()}: " + message.sid)
+    else:
+        print(f"Failed to send {message_type} to: " + to_number)
                 
 def interact_with_network():
     """
@@ -709,5 +731,25 @@ def interact_with_network():
 
     # Send an SMS or WhatsApp message for the first voucher in the first group
     send_message(all_vouchers, column_data)  
+
+def get_next_month_name():
+    """
+    Returns the name of the month following the current month.
+
+    Args:
+        None
+
+    Returns:
+        str: The name of the next month.
+
+    Examples:
+        >>> get_next_month_name()  # If it's currently December
+        'January'
+    """
+    current_month = time.strftime("%B")  # Get the current month name
+    month_names = ["January", "February", "March", "April", "May", "June", 
+                   "July", "August", "September", "October", "November", "December"]
+    next_month_index = (month_names.index(current_month) + 1) % 12
+    return month_names[next_month_index]
 
 interact_with_network()
