@@ -63,3 +63,38 @@ def cleanup_files():
             data = json.load(f)
             if time.time() - data['timestamp'] >= 3600:  # Check if network_id is more than 1 hour old
                 os.remove('network_store.txt')
+
+def format_number(number):
+    """
+    Formats a phone number to the South African international format.
+
+    Args:
+        number (str or int): The phone number to be formatted.
+
+    Returns:
+        str: The formatted phone number in the South African international format.
+
+    Raises:
+        None
+
+    Examples:
+        >>> format_number('0821234567')
+        '+27821234567'
+
+        >>> format_number(821234567)
+        '+27821234567'
+    """
+    # Convert number to string if it's not already a string
+    if not isinstance(number, str):
+        number = str(number)
+    # Remove any spaces or special characters from the number
+    number = number.replace(' ', '').replace('-', '')
+    # Check if the number is a valid 9 or 10-digit number
+    if len(number) == 11 and number.startswith('27'):
+        return '+' + number
+    elif len(number) == 10 and number.startswith('0'):
+        return '+27' + number[1:]
+    elif len(number) == 9:
+        return '+27' + number
+    else:
+        return number
